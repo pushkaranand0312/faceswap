@@ -16,18 +16,18 @@ from lib.align.alignments import PNGHeaderDict
 
 from lib.image import encode_image, generate_thumbnail, ImagesLoader, ImagesSaver, read_image_meta
 from lib.multithreading import MultiThread
-from lib.utils import get_folder, _image_extensions, _video_extensions
-from plugins.extract.pipeline import Extractor, ExtractMedia
+from lib.utils import get_folder, handle_deprecated_cliopts, IMAGE_EXTENSIONS, VIDEO_EXTENSIONS
+from plugins.extract import ExtractMedia, Extractor
 from scripts.fsmedia import Alignments, PostProcess, finalize
 
 if T.TYPE_CHECKING:
     from lib.align.alignments import PNGHeaderAlignmentsDict
 
 # tqdm.monitor_interval = 0  # workaround for TqdmSynchronisationWarning  # TODO?
-logger = logging.getLogger(__name__)  # pylint: disable=invalid-name
+logger = logging.getLogger(__name__)
 
 
-class Extract():  # pylint:disable=too-few-public-methods
+class Extract():
     """ The Faceswap Face Extraction Process.
 
     The extraction process is responsible for detecting faces in a series of images/video, aligning
@@ -47,7 +47,7 @@ class Extract():  # pylint:disable=too-few-public-methods
     """
     def __init__(self, arguments: Namespace) -> None:
         logger.debug("Initializing %s: (args: %s", self.__class__.__name__, arguments)
-        self._args = arguments
+        self._args = handle_deprecated_cliopts(arguments)
         self._input_locations = self._get_input_locations()
         self._validate_batchmode()
 
@@ -90,9 +90,9 @@ class Extract():  # pylint:disable=too-few-public-methods
         retval = [os.path.join(self._args.input_dir, fname)
                   for fname in os.listdir(self._args.input_dir)
                   if (os.path.isdir(os.path.join(self._args.input_dir, fname))  # folder images
-                      and any(os.path.splitext(iname)[-1].lower() in _image_extensions
+                      and any(os.path.splitext(iname)[-1].lower() in IMAGE_EXTENSIONS
                               for iname in os.listdir(os.path.join(self._args.input_dir, fname))))
-                  or os.path.splitext(fname)[-1].lower() in _video_extensions]  # video
+                  or os.path.splitext(fname)[-1].lower() in VIDEO_EXTENSIONS]  # video
 
         logger.debug("Input locations: %s", retval)
         return retval
@@ -268,7 +268,7 @@ class Filter():
 
         retval = [os.path.join(test_folder, fname)
                   for fname in os.listdir(test_folder)
-                  if os.path.splitext(fname)[-1].lower() in _image_extensions]
+                  if os.path.splitext(fname)[-1].lower() in IMAGE_EXTENSIONS]
         logger.info("Collected files from folder '%s': %s", test_folder,
                     [os.path.basename(f) for f in retval])
         return retval
@@ -299,7 +299,7 @@ class Filter():
             filt_files = [] if files is None else self._files_from_folder(files)
             for file in filt_files:
                 if (not os.path.isfile(file) or
-                        os.path.splitext(file)[-1].lower() not in _image_extensions):
+                        os.path.splitext(file)[-1].lower() not in IMAGE_EXTENSIONS):
                     logger.warning("Filter file '%s' does not exist or is not an image file", file)
                     error = True
             retval.append(filt_files)
@@ -596,8 +596,8 @@ class PipelineLoader():
         Parameters
         ----------
         detected_faces: dict
-            Dictionary of :class:`plugins.extract.pipeline.ExtractMedia` with the filename as the
-            key for repopulating the image attribute.
+            Dictionary of :class:`~plugins.extract.extract_media.ExtractMedia` with the filename as
+            the key for repopulating the image attribute.
         """
         logger.debug("Reload Images: Start. Detected Faces Count: %s", len(detected_faces))
         load_queue = self._extractor.input_queue
@@ -616,7 +616,7 @@ class PipelineLoader():
         logger.debug("Reload Images: Complete")
 
 
-class _Extract():  # pylint:disable=too-few-public-methods
+class _Extract():
     """ The Actual extraction process.
 
     This class is called by the parent :class:`Extract` process
@@ -643,6 +643,7 @@ class _Extract():  # pylint:disable=too-few-public-methods
 
         self._alignments = Alignments(self._args, True, self._loader.is_video)
         self._extractor = extractor
+        self._extractor.import_data(self._args.input_dir)
 
         self._existing_count = 0
         self._set_skip_list()
@@ -753,7 +754,7 @@ class _Extract():  # pylint:disable=too-few-public-methods
 
         Parameters
         ----------
-        extract_media: :class:`plugins.extract.pipeline.ExtractMedia`
+        extract_media: :class:`~plugins.extract.extract_media.ExtractMedia`
             Output from :class:`plugins.extract.pipeline.Extractor`
         size: int
             The size that the aligned face should be created at
@@ -785,7 +786,7 @@ class _Extract():  # pylint:disable=too-few-public-methods
         ----------
         saver: :class:`lib.images.ImagesSaver` or ``None``
             The background saver for saving the image or ``None`` if faces are not to be saved
-        extract_media: :class:`~plugins.extract.pipeline.ExtractMedia`
+        extract_media: :class:`~plugins.extract.extract_media.ExtractMedia`
             The output from :class:`~plugins.extract.Pipeline.Extractor`
         """
         logger.trace("Outputting faces for %s", extract_media.filename)  # type: ignore

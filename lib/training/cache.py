@@ -11,8 +11,7 @@ import cv2
 import numpy as np
 from tqdm import tqdm
 
-from lib.align import DetectedFace
-from lib.align.aligned_face import CenteringType
+from lib.align import CenteringType, DetectedFace, LandmarkType
 from lib.image import read_image_batch, read_image_meta_batch
 from lib.utils import FaceswapError
 
@@ -225,8 +224,17 @@ class _Cache():
                 logger.debug("All metadata already cached for: %s", keys)
                 return read_image_batch(filenames)
 
-            batch, metadata = read_image_batch(filenames, with_metadata=True)
-
+            try:
+                batch, metadata = read_image_batch(filenames, with_metadata=True)
+            except ValueError as err:
+                if "inhomogeneous" in str(err):
+                    raise FaceswapError(
+                        "There was an error loading a batch of images. This is most likely due to "
+                        "non-faceswap extracted faces in your training folder."
+                        "\nAll training images should be Faceswap extracted faces."
+                        "\nAll training images should be the same size."
+                        f"\nThe files that caused this error are: {filenames}") from err
+                raise
             if len(batch.shape) == 1:
                 folder = os.path.dirname(filenames[0])
                 details = [
@@ -271,6 +279,11 @@ class _Cache():
             The list of full paths to the images to load the metadata from
         side: str
             `"a"` or `"b"`. The side of the model being cached. Used for info output
+
+        Raises
+        ------
+        FaceSwapError
+            If unsupported landmark type exists
         """
         with self._lock:
             for filename, meta in tqdm(read_image_meta_batch(filenames),
@@ -285,6 +298,13 @@ class _Cache():
                 # Version Check
                 self._validate_version(meta, filename)
                 detected_face = self._load_detected_face(filename, meta["alignments"])
+
+                aligned = detected_face.aligned
+                assert aligned is not None
+                if aligned.landmark_type != LandmarkType.LM_2D_68:
+                    raise FaceswapError("68 Point facial Landmarks are required for Warp-to-"
+                                        f"landmarks. The face that failed was: '{filename}'")
+
                 self._cache[key] = detected_face
                 self._partially_loaded.append(key)
 
@@ -412,15 +432,20 @@ class _Cache():
             return None
 
         if self._config["mask_type"] not in detected_face.mask:
+            exist_masks = list(detected_face.mask)
+            msg = "No masks exist for this face"
+            if exist_masks:
+                msg = f"The masks that exist for this face are: {exist_masks}"
             raise FaceswapError(
                 f"You have selected the mask type '{self._config['mask_type']}' but at least one "
                 "face does not contain the selected mask.\n"
-                f"The face that failed was: '{filename}'\n"
-                f"The masks that exist for this face are: {list(detected_face.mask)}")
+                f"The face that failed was: '{filename}'\n{msg}")
 
         mask = detected_face.mask[str(self._config["mask_type"])]
+        assert isinstance(self._config["mask_dilation"], float)
         assert isinstance(self._config["mask_blur_kernel"], int)
         assert isinstance(self._config["mask_threshold"], int)
+        mask.set_dilation(self._config["mask_dilation"])
         mask.set_blur_and_threshold(blur_kernel=self._config["mask_blur_kernel"],
                                     threshold=self._config["mask_threshold"])
 
@@ -458,13 +483,18 @@ class _Cache():
         assert isinstance(multiplier, int)
         if not self._config["penalized_mask_loss"] or multiplier <= 1:
             return None
-        mask = detected_face.get_landmark_mask(area, self._size // 16, self._size // 32)
+        try:
+            mask = detected_face.get_landmark_mask(area, self._size // 16, 2.5)
+        except FaceswapError as err:
+            logger.error(str(err))
+            raise FaceswapError("Eye/Mouth multiplier masks could not be generated due to missing "
+                                f"landmark data. The file that failed was: '{filename}'") from err
         logger.trace("Caching localized '%s' mask for: %s %s",  # type: ignore
                      area, filename, mask.shape)
         return mask
 
 
-class RingBuffer():  # pylint: disable=too-few-public-methods
+class RingBuffer():
     """ Rolling buffer for holding training/preview batches
 
     Parameters

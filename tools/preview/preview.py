@@ -16,15 +16,15 @@ from threading import Event, Lock, Thread
 import numpy as np
 
 from lib.align import DetectedFace
-from lib.cli.args import ConvertArgs
+from lib.cli.args_extract_convert import ConvertArgs
 from lib.gui.utils import get_images, get_config, initialize_config, initialize_images
 from lib.convert import Converter
-from lib.utils import FaceswapError
+from lib.utils import FaceswapError, handle_deprecated_cliopts
 from lib.queue_manager import queue_manager
 from scripts.fsmedia import Alignments, Images
 from scripts.convert import Predict, ConvertItem
 
-from plugins.extract.pipeline import ExtractMedia
+from plugins.extract import ExtractMedia
 
 from .control_panels import ActionFrame, ConfigTools, OptionsBook
 from .viewer import FacesDisplay, ImagesCanvas
@@ -34,14 +34,14 @@ if T.TYPE_CHECKING:
     from lib.queue_manager import EventQueue
     from .control_panels import BusyProgressBar
 
-logger = logging.getLogger(__name__)  # pylint: disable=invalid-name
+logger = logging.getLogger(__name__)
 
 # LOCALES
 _LANG = gettext.translation("tools.preview", localedir="locales", fallback=True)
 _ = _LANG.gettext
 
 
-class Preview(tk.Tk):  # pylint:disable=too-few-public-methods
+class Preview(tk.Tk):
     """ This tool is part of the Faceswap Tools suite and should be called from
     ``python tools.py preview`` command.
 
@@ -59,6 +59,7 @@ class Preview(tk.Tk):  # pylint:disable=too-few-public-methods
     def __init__(self, arguments: Namespace) -> None:
         logger.debug("Initializing %s: (arguments: '%s'", self.__class__.__name__, arguments)
         super().__init__()
+        arguments = handle_deprecated_cliopts(arguments)
         self._config_tools = ConfigTools()
         self._lock = Lock()
         self._dispatcher = Dispatcher(self)
@@ -289,15 +290,20 @@ class Samples():
                          "file was generated. You need to update the file to proceed.")
             logger.error("To do this run the 'Alignments Tool' > 'Extract' Job.")
             sys.exit(1)
+
         if not self._alignments.have_alignments_file:
             logger.error("Alignments file not found at: '%s'", self._alignments.file)
             sys.exit(1)
+
+        if self._images.is_video:
+            assert isinstance(self._images.input_images, str)
+            self._alignments.update_legacy_has_source(os.path.basename(self._images.input_images))
+
         self._filelist = self._get_filelist()
         self._indices = self._get_indices()
 
-        self._predictor = Predict(queue_manager.get_queue("preview_predict_in"),
-                                  self._sample_size,
-                                  arguments)
+        self._predictor = Predict(self._sample_size, arguments)
+        self._predictor.launch(queue_manager.get_queue("preview_predict_in"))
         self._app._display.set_centering(self._predictor.centering)
         self.generate()
 
@@ -349,7 +355,8 @@ class Samples():
         """
         logger.debug("Filtering file list to frames with faces")
         if isinstance(self._images.input_images, str):
-            filelist = [f"{os.path.splitext(self._images.input_images)[0]}_{frame_no:06d}.png"
+            vid_name, ext = os.path.splitext(self._images.input_images)
+            filelist = [f"{vid_name}_{frame_no:06d}{ext}"
                         for frame_no in range(1, self._images.images_found + 1)]
         else:
             filelist = self._images.input_images
@@ -456,7 +463,7 @@ class Samples():
         logger.debug("Predicted faces")
 
 
-class Patch():  # pylint:disable=too-few-public-methods
+class Patch():
     """ The Patch pipeline
 
     Runs in it's own thread. Takes the output from the Faceswap model predictor and runs the faces

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """ Phaze-A Model by TorzDF with thanks to BirbFakes and the myriad of testers. """
 
-# pylint: disable=too-many-lines
+# pylint:disable=too-many-lines
 from __future__ import annotations
 import logging
 import typing as T
@@ -20,7 +20,7 @@ from lib.utils import get_tf_version, FaceswapError
 
 from ._base import ModelBase, get_all_sub_models
 
-logger = logging.getLogger(__name__)  # pylint: disable=invalid-name
+logger = logging.getLogger(__name__)
 
 K = tf.keras.backend
 kapp = tf.keras.applications
@@ -163,8 +163,8 @@ class Model(ModelBase):
     """
     def __init__(self, *args, **kwargs) -> None:
         super().__init__(*args, **kwargs)
-        if self.config["output_size"] % 64 != 0:
-            raise FaceswapError("Phaze-A output shape must be a multiple of 64")
+        if self.config["output_size"] % 16 != 0:
+            raise FaceswapError("Phaze-A output shape must be a multiple of 16")
 
         self._validate_encoder_architecture()
         self.config["freeze_layers"] = self._select_freeze_layers()
@@ -186,7 +186,7 @@ class Model(ModelBase):
             super().build()
             return
         with self._settings.strategy_scope():
-            model = self._io._load()  # pylint:disable=protected-access
+            model = self.io.load()
             model = self._update_dropouts(model)
             self._model = model
             self._compile_model()
@@ -979,7 +979,7 @@ class FullyConnected():  # pylint:disable=too-few-public-methods
         return keras.models.Model(input_, var_x, name=f"fc_{self._side}")
 
 
-class UpscaleBlocks():  # pylint: disable=too-few-public-methods
+class UpscaleBlocks():  # pylint:disable=too-few-public-methods
     """ Obtain a block of upscalers.
 
     This class exists outside of the :class:`Decoder` model, as it is possible to place some of

@@ -12,10 +12,10 @@ import cv2
 import numpy as np
 from tqdm import tqdm
 
-from lib.align import DetectedFace, _EXTRACT_RATIOS
+from lib.align import DetectedFace, EXTRACT_RATIOS, LANDMARK_PARTS, LandmarkType
 from lib.align.alignments import _VERSION, PNGHeaderDict
 from lib.image import encode_image, generate_thumbnail, ImagesSaver
-from plugins.extract.pipeline import Extractor, ExtractMedia
+from plugins.extract import ExtractMedia, Extractor
 from .media import ExtractedFaces, Frames
 
 if T.TYPE_CHECKING:
@@ -25,7 +25,7 @@ if T.TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-class Draw():  # pylint:disable=too-few-public-methods
+class Draw():
     """ Draws annotations onto original frames and saves into a sub-folder next to the original
     frames.
 
@@ -41,14 +41,6 @@ class Draw():  # pylint:disable=too-few-public-methods
         self._alignments = alignments
         self._frames = Frames(arguments.frames_dir)
         self._output_folder = self._set_output()
-        self._mesh_areas = {"mouth": (48, 68),
-                            "right_eyebrow": (17, 22),
-                            "left_eyebrow": (22, 27),
-                            "right_eye": (36, 42),
-                            "left_eye": (42, 48),
-                            "nose": (27, 36),
-                            "jaw": (0, 17),
-                            "chin": (8, 11)}
         logger.debug("Initialized %s", self.__class__.__name__)
 
     def _set_output(self) -> str:
@@ -104,6 +96,8 @@ class Draw():  # pylint:disable=too-few-public-methods
             face = DetectedFace()
             face.from_alignment(alignment, image=image)
             # Bounding Box
+            assert face.left is not None
+            assert face.top is not None
             cv2.rectangle(image, (face.left, face.top), (face.right, face.bottom), (255, 0, 0), 1)
             self._annotate_landmarks(image, np.rint(face.landmarks_xy).astype("int32"))
             self._annotate_extract_boxes(image, face, idx)
@@ -119,12 +113,11 @@ class Draw():  # pylint:disable=too-few-public-methods
         image: :class:`numpy.ndarray`
             The frame that extract boxes are to be annotated on to
         landmarks: :class:`numpy.ndarray`
-            The 68 point landmarks that are to be annotated onto the frame
+            The facial landmarks that are to be annotated onto the frame
         """
         # Mesh
-        for area, indices in self._mesh_areas.items():
-            fill = area in ("right_eye", "left_eye", "mouth")
-            cv2.polylines(image, [landmarks[indices[0]:indices[1]]], fill, (255, 255, 0), 1)
+        for start, end, fill in LANDMARK_PARTS[LandmarkType.from_shape(landmarks.shape)].values():
+            cv2.polylines(image, [landmarks[start:end]], fill, (255, 255, 0), 1)
         # Landmarks
         for (pos_x, pos_y) in landmarks:
             cv2.circle(image, (pos_x, pos_y), 1, (0, 255, 255), -1)
@@ -171,7 +164,7 @@ class Draw():  # pylint:disable=too-few-public-methods
         cv2.line(image, tuple(center), tuple(points[2]), (0, 0, 255), 2)
 
 
-class Extract():  # pylint:disable=too-few-public-methods
+class Extract():
     """ Re-extract faces from source frames based on Alignment data
 
     Parameters
@@ -460,9 +453,9 @@ class Extract():  # pylint:disable=too-few-public-methods
                 continue
             old_mask = mask.mask.astype("float32") / 255.0
             size = old_mask.shape[0]
-            new_size = int(size + (size * _EXTRACT_RATIOS["face"]) / 2)
+            new_size = int(size + (size * EXTRACT_RATIOS["face"]) / 2)
 
-            shift = np.rint(offset * (size - (size * _EXTRACT_RATIOS["face"]))).astype("int32")
+            shift = np.rint(offset * (size - (size * EXTRACT_RATIOS["face"]))).astype("int32")
             pos = np.array([(new_size // 2 - size // 2) - shift[1],
                             (new_size // 2) + (size // 2) - shift[1],
                             (new_size // 2 - size // 2) - shift[0],

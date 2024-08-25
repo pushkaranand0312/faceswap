@@ -57,7 +57,7 @@ class DataGenerator():
                  side: T.Literal["a", "b"],
                  images: list[str],
                  batch_size: int) -> None:
-        logger.debug("Initializing %s: (model: %s, side: %s, images: %s , "  # type: ignore
+        logger.debug("Initializing %s: (model: %s, side: %s, images: %s , "
                      "batch_size: %s, config: %s)", self.__class__.__name__, model.name, side,
                      len(images), batch_size, config)
         self._config = config
@@ -243,8 +243,9 @@ class DataGenerator():
             raw_faces = read_image_batch(filenames)
 
         detected_faces = self._face_cache.get_items(filenames)
-        logger.trace("filenames: %s, raw_faces: '%s', detected_faces: %s",  # type: ignore
-                     filenames, raw_faces.shape, len(detected_faces))
+        logger.trace(  # type:ignore[attr-defined]
+            "filenames: %s, raw_faces: '%s', detected_faces: %s",
+            filenames, raw_faces.shape, len(detected_faces))
         return raw_faces, detected_faces
 
     def _crop_to_coverage(self,
@@ -271,8 +272,8 @@ class DataGenerator():
         batch: :class:`np.ndarray`
             The pre-allocated array to hold this batch
         """
-        logger.trace("Cropping training images info: (filenames: %s, side: '%s')",  # type: ignore
-                     filenames, self._side)
+        logger.trace(  # type:ignore[attr-defined]
+            "Cropping training images info: (filenames: %s, side: '%s')", filenames, self._side)
 
         with futures.ThreadPoolExecutor() as executor:
             proc = {executor.submit(face.aligned.extract_face, img): idx
@@ -304,7 +305,7 @@ class DataGenerator():
         masks = np.array([face.get_training_masks() for face in detected_faces])
         batch[..., 3:] = masks
 
-        logger.trace("side: %s, masks: %s, batch: %s",  # type: ignore
+        logger.trace("side: %s, masks: %s, batch: %s",  # type:ignore[attr-defined]
                      self._side, masks.shape, batch.shape)
 
     def _process_batch(self, filenames: list[str]) -> BatchType:
@@ -333,9 +334,9 @@ class DataGenerator():
         self._apply_mask(detected_faces, batch)
         feed, targets = self.process_batch(filenames, raw_faces, detected_faces, batch)
 
-        logger.trace("Processed %s batch side %s. (filenames: %s, feed: %s, "  # type: ignore
-                     "targets: %s)", self.__class__.__name__, self._side, filenames,
-                     feed.shape, [t.shape for t in targets])
+        logger.trace(  # type:ignore[attr-defined]
+            "Processed %s batch side %s. (filenames: %s, feed: %s, targets: %s)",
+            self.__class__.__name__, self._side, filenames, feed.shape, [t.shape for t in targets])
 
         return feed, targets
 
@@ -390,7 +391,7 @@ class DataGenerator():
                            casting="unsafe")
 
 
-class TrainingDataGenerator(DataGenerator):  # pylint:disable=too-few-public-methods
+class TrainingDataGenerator(DataGenerator):
     """ A Training Data Generator for compiling data for feeding to a model.
 
     This class is called from :mod:`plugins.train.trainer._base` and launches a background
@@ -450,15 +451,19 @@ class TrainingDataGenerator(DataGenerator):  # pylint:disable=too-few-public-met
             List of 4-dimensional target images, at all model output sizes, with masks compiled
             into channels 4+ for each output size
         """
-        logger.trace("Compiling targets: batch shape: %s", batch.shape)  # type: ignore
+        logger.trace("Compiling targets: batch shape: %s",  # type:ignore[attr-defined]
+                     batch.shape)
         if len(self._output_sizes) == 1 and self._output_sizes[0] == self._process_size:
             # Rolling buffer here makes next to no difference, so just create array on the fly
             retval = [self._to_float32(batch)]
         else:
-            retval = [self._to_float32(np.array([cv2.resize(image, (size, size), cv2.INTER_AREA)
+            retval = [self._to_float32(np.array([cv2.resize(image,
+                                                            (size, size),
+                                                            interpolation=cv2.INTER_AREA)
                                                  for image in batch]))
                       for size in self._output_sizes]
-        logger.trace("Processed targets: %s", [t.shape for t in retval])  # type: ignore
+        logger.trace("Processed targets: %s",  # type:ignore[attr-defined]
+                     [t.shape for t in retval])
         return retval
 
     def process_batch(self,
@@ -533,7 +538,7 @@ class TrainingDataGenerator(DataGenerator):  # pylint:disable=too-few-public-met
             feed = self._to_float32(np.array([cv2.resize(image,
                                                          (self._model_input_size,
                                                           self._model_input_size),
-                                                         cv2.INTER_AREA)
+                                                         interpolation=cv2.INTER_AREA)
                                               for image in warped]))
         else:
             feed = self._to_float32(warped)
@@ -556,8 +561,9 @@ class TrainingDataGenerator(DataGenerator):  # pylint:disable=too-few-public-met
         :class:`np.ndarray`
             Randomly selected closest matches from the other side's landmarks
         """
-        logger.trace("Retrieving closest matched landmarks: (filenames: '%s', "  # type: ignore
-                     "src_points: '%s')", filenames, batch_src_points)
+        logger.trace(  # type:ignore[attr-defined]
+            "Retrieving closest matched landmarks: (filenames: '%s', src_points: '%s')",
+            filenames, batch_src_points)
         lm_side: T.Literal["a", "b"] = "a" if self._side == "b" else "b"
         other_cache = get_cache(lm_side)
         landmarks = other_cache.aligned_landmarks
@@ -575,7 +581,8 @@ class TrainingDataGenerator(DataGenerator):  # pylint:disable=too-few-public-met
             closest_matches = self._cache_closest_matches(filenames, batch_src_points, landmarks)
 
         batch_dst_points = np.array([landmarks[choice(fname)] for fname in closest_matches])
-        logger.trace("Returning: (batch_dst_points: %s)", batch_dst_points.shape)  # type: ignore
+        logger.trace("Returning: (batch_dst_points: %s)",  # type:ignore[attr-defined]
+                     batch_dst_points.shape)
         return batch_dst_points
 
     def _cache_closest_matches(self,
@@ -648,8 +655,9 @@ class PreviewDataGenerator(DataGenerator):
         list
             List of 4-dimensional target images, at final model output size
         """
-        logger.trace("Compiling samples: images shape: %s, detected_faces: %s ",  # type: ignore
-                     images.shape, len(detected_faces))
+        logger.trace(  # type:ignore[attr-defined]
+            "Compiling samples: images shape: %s, detected_faces: %s ",
+            images.shape, len(detected_faces))
         output_size = self._output_sizes[-1]
         full_size = 2 * int(np.rint((output_size / self._coverage_ratio) / 2))
 
@@ -665,7 +673,7 @@ class PreviewDataGenerator(DataGenerator):
                         is_aligned=True).face
             for idx, face in enumerate(detected_faces)]))
 
-        logger.trace("Processed samples: %s", retval.shape)  # type: ignore
+        logger.trace("Processed samples: %s", retval.shape)  # type:ignore[attr-defined]
         return [retval]
 
     def process_batch(self,
@@ -724,3 +732,237 @@ class PreviewDataGenerator(DataGenerator):
         samples = self._create_samples(images, detected_faces)
 
         return feed, samples
+
+
+class Feeder():
+    """ Handles the processing of a Batch for training the model and generating samples.
+
+    Parameters
+    ----------
+    images: dict
+        The list of full paths to the training images for this :class:`_Feeder` for each side
+    model: plugin from :mod:`plugins.train.model`
+        The selected model that will be running this trainer
+    batch_size: int
+        The size of the batch to be processed for each side at each iteration
+    config: dict
+        The configuration for this trainer
+    include_preview: bool, optional
+        ``True`` to create a feeder for generating previews. Default: ``True``
+    """
+    def __init__(self,
+                 images: dict[T.Literal["a", "b"], list[str]],
+                 model: ModelBase,
+                 batch_size: int,
+                 config: dict[str, ConfigValueType],
+                 include_preview: bool = True) -> None:
+        logger.debug("Initializing %s: num_images: %s, batch_size: %s, config: %s, "
+                     "include_preview: %s)", self.__class__.__name__,
+                     {k: len(v) for k, v in images.items()}, batch_size, config, include_preview)
+        self._model = model
+        self._images = images
+        self._batch_size = batch_size
+        self._config = config
+        self._feeds = {
+            side: self._load_generator(side, False).minibatch_ab()
+            for side in T.get_args(T.Literal["a", "b"])}
+
+        self._display_feeds = {"preview": self._set_preview_feed() if include_preview else {},
+                               "timelapse": {}}
+        logger.debug("Initialized %s:", self.__class__.__name__)
+
+    def _load_generator(self,
+                        side: T.Literal["a", "b"],
+                        is_display: bool,
+                        batch_size: int | None = None,
+                        images: list[str] | None = None) -> DataGenerator:
+        """ Load the :class:`~lib.training_data.TrainingDataGenerator` for this feeder.
+
+        Parameters
+        ----------
+        side: ["a", "b"]
+            The side of the model to load the generator for
+        is_display: bool
+            ``True`` if the generator is for creating preview/time-lapse images. ``False`` if it is
+            for creating training images
+        batch_size: int, optional
+            If ``None`` then the batch size selected in command line arguments is used, otherwise
+            the batch size provided here is used.
+        images: list, optional. Default: ``None``
+            If provided then this will be used as the list of images for the generator. If ``None``
+            then the training folder images for the side will be used. Default: ``None``
+
+        Returns
+        -------
+        :class:`~lib.training_data.TrainingDataGenerator`
+            The training data generator
+        """
+        logger.debug("Loading generator, side: %s, is_display: %s,  batch_size: %s",
+                     side, is_display, batch_size)
+        generator = PreviewDataGenerator if is_display else TrainingDataGenerator
+        retval = generator(self._config,
+                           self._model,
+                           side,
+                           self._images[side] if images is None else images,
+                           self._batch_size if batch_size is None else batch_size)
+        return retval
+
+    def _set_preview_feed(self) -> dict[T.Literal["a", "b"], Generator[BatchType, None, None]]:
+        """ Set the preview feed for this feeder.
+
+        Creates a generator from :class:`lib.training_data.PreviewDataGenerator` specifically
+        for previews for the feeder.
+
+        Returns
+        -------
+        dict
+            The side ("a" or "b") as key, :class:`~lib.training_data.PreviewDataGenerator` as
+            value.
+        """
+        retval: dict[T.Literal["a", "b"], Generator[BatchType, None, None]] = {}
+        num_images = self._config.get("preview_images", 14)
+        assert isinstance(num_images, int)
+        for side in T.get_args(T.Literal["a", "b"]):
+            logger.debug("Setting preview feed: (side: '%s')", side)
+            preview_images = min(max(num_images, 2), 16)
+            batchsize = min(len(self._images[side]), preview_images)
+            retval[side] = self._load_generator(side,
+                                                True,
+                                                batch_size=batchsize).minibatch_ab()
+        return retval
+
+    def get_batch(self) -> tuple[list[list[np.ndarray]], ...]:
+        """ Get the feed data and the targets for each training side for feeding into the model's
+        train function.
+
+        Returns
+        -------
+        model_inputs: list
+            The inputs to the model for each side A and B
+        model_targets: list
+            The targets for the model for each side A and B
+        """
+        model_inputs: list[list[np.ndarray]] = []
+        model_targets: list[list[np.ndarray]] = []
+        for side in ("a", "b"):
+            side_feed, side_targets = next(self._feeds[side])
+            if self._model.config["learn_mask"]:  # Add the face mask as it's own target
+                side_targets += [side_targets[-1][..., 3][..., None]]
+            logger.trace(  # type:ignore[attr-defined]
+                "side: %s, input_shapes: %s, target_shapes: %s",
+                side, side_feed.shape, [i.shape for i in side_targets])
+            model_inputs.append([side_feed])
+            model_targets.append(side_targets)
+
+        return model_inputs, model_targets
+
+    def generate_preview(self, is_timelapse: bool = False
+                         ) -> dict[T.Literal["a", "b"], list[np.ndarray]]:
+        """ Generate the images for preview window or timelapse
+
+        Parameters
+        ----------
+        is_timelapse, bool, optional
+            ``True`` if preview is to be generated for a Timelapse otherwise ``False``.
+            Default: ``False``
+
+        Returns
+        -------
+        dict
+            Dictionary for side A and B of list of numpy arrays corresponding to the
+            samples, targets and masks for this preview
+        """
+        logger.debug("Generating preview (is_timelapse: %s)", is_timelapse)
+
+        batchsizes: list[int] = []
+        feed: dict[T.Literal["a", "b"], np.ndarray] = {}
+        samples: dict[T.Literal["a", "b"], np.ndarray] = {}
+        masks: dict[T.Literal["a", "b"], np.ndarray] = {}
+
+        # MyPy can't recurse into nested dicts to get the type :(
+        iterator = T.cast(dict[T.Literal["a", "b"], "Generator[BatchType, None, None]"],
+                          self._display_feeds["timelapse" if is_timelapse else "preview"])
+        for side in T.get_args(T.Literal["a", "b"]):
+            side_feed, side_samples = next(iterator[side])
+            batchsizes.append(len(side_samples[0]))
+            samples[side] = side_samples[0]
+            feed[side] = side_feed[..., :3]
+            masks[side] = side_feed[..., 3][..., None]
+
+        logger.debug("Generated samples: is_timelapse: %s, images: %s", is_timelapse,
+                     {key: {k: v.shape for k, v in item.items()}
+                      for key, item
+                      in zip(("feed", "samples", "sides"), (feed, samples, masks))})
+        return self.compile_sample(min(batchsizes), feed, samples, masks)
+
+    def compile_sample(self,
+                       image_count: int,
+                       feed: dict[T.Literal["a", "b"], np.ndarray],
+                       samples: dict[T.Literal["a", "b"], np.ndarray],
+                       masks: dict[T.Literal["a", "b"], np.ndarray]
+                       ) -> dict[T.Literal["a", "b"], list[np.ndarray]]:
+        """ Compile the preview samples for display.
+
+        Parameters
+        ----------
+        image_count: int
+            The number of images to limit the sample output to.
+        feed: dict
+            Dictionary for side "a", "b" of :class:`numpy.ndarray`. The images that should be fed
+            into the model for obtaining a prediction
+        samples: dict
+            Dictionary for side "a", "b" of :class:`numpy.ndarray`. The 100% coverage target images
+            that should be used for creating the preview.
+        masks: dict
+            Dictionary for side "a", "b" of :class:`numpy.ndarray`. The masks that should be used
+            for creating the preview.
+
+        Returns
+        -------
+        list
+            The list of samples, targets and masks as :class:`numpy.ndarrays` for creating a
+            preview image
+         """
+        num_images = self._config.get("preview_images", 14)
+        assert isinstance(num_images, int)
+        num_images = min(image_count, num_images)
+        retval: dict[T.Literal["a", "b"], list[np.ndarray]] = {}
+        for side in T.get_args(T.Literal["a", "b"]):
+            logger.debug("Compiling samples: (side: '%s', samples: %s)", side, num_images)
+            retval[side] = [feed[side][0:num_images],
+                            samples[side][0:num_images],
+                            masks[side][0:num_images]]
+        logger.debug("Compiled Samples: %s", {k: [i.shape for i in v] for k, v in retval.items()})
+        return retval
+
+    def set_timelapse_feed(self,
+                           images: dict[T.Literal["a", "b"], list[str]],
+                           batch_size: int) -> None:
+        """ Set the time-lapse feed for this feeder.
+
+        Creates a generator from :class:`lib.training_data.PreviewDataGenerator` specifically
+        for generating time-lapse previews for the feeder.
+
+        Parameters
+        ----------
+        images: dict
+            The list of full paths to the images for creating the time-lapse for each side
+        batch_size: int
+            The number of images to be used to create the time-lapse preview.
+        """
+        logger.debug("Setting time-lapse feed: (input_images: '%s', batch_size: %s)",
+                     images, batch_size)
+
+        # MyPy can't recurse into nested dicts to get the type :(
+        iterator = T.cast(dict[T.Literal["a", "b"], "Generator[BatchType, None, None]"],
+                          self._display_feeds["timelapse"])
+
+        for side in T.get_args(T.Literal["a", "b"]):
+            imgs = images[side]
+            logger.debug("Setting preview feed: (side: '%s', images: %s)", side, len(imgs))
+
+            iterator[side] = self._load_generator(side,
+                                                  True,
+                                                  batch_size=batch_size,
+                                                  images=imgs).minibatch_ab(do_shuffle=False)
+        logger.debug("Set time-lapse feed: %s", self._display_feeds["timelapse"])

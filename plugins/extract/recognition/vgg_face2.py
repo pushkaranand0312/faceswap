@@ -17,7 +17,7 @@ from ._base import BatchType, RecogBatch, Identity
 if T.TYPE_CHECKING:
     from collections.abc import Generator
 
-logger = logging.getLogger(__name__)  # pylint: disable=invalid-name
+logger = logging.getLogger(__name__)
 
 
 class Recognition(Identity):
@@ -99,7 +99,7 @@ class Recognition(Identity):
         return
 
 
-class Cluster():  # pylint: disable=too-few-public-methods
+class Cluster():  # pylint:disable=too-few-public-methods
     """ Cluster the outputs from a VGG-Face 2 Model
 
     Parameters

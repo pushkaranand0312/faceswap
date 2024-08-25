@@ -101,7 +101,7 @@ _NON_PRIMARY_LOSS = ["flip", "lpips_alex", "lpips_squeeze", "lpips_vgg16", "none
 
 class Config(FaceswapConfig):
     """ Config File for Models """
-    # pylint: disable=too-many-statements
+    # pylint:disable=too-many-statements
     def set_defaults(self) -> None:
         """ Set the default values for config """
         logger.debug("Setting defaults")
@@ -274,6 +274,53 @@ class Config(FaceswapConfig):
                 "reason (e.g. power outage, Out of Memory Error, NaN detected) then the "
                 "optimizer weights will NOT be saved."))
 
+        self.add_item(
+            section=section,
+            title="lr_finder_iterations",
+            datatype=int,
+            default=1000,
+            min_max=(100, 10000),
+            rounding=100,
+            fixed=True,
+            group=_("Learning Rate Finder"),
+            info=_(
+                "The number of iterations to process to find the optimal learning rate. Higher "
+                "values will take longer, but will be more accurate."))
+        self.add_item(
+            section=section,
+            title="lr_finder_mode",
+            datatype=str,
+            default="set",
+            fixed=True,
+            gui_radio=True,
+            choices=["set", "graph_and_set", "graph_and_exit"],
+            group=_("Learning Rate Finder"),
+            info=_(
+                "The operation mode for the learning rate finder. Only applicable to new models. "
+                "For existing models this will always default to 'set'."
+                "\n\tset - Train with the discovered optimal learning rate."
+                "\n\tgraph_and_set - Output a graph in the training folder showing the discovered "
+                "learning rates and train with the optimal learning rate."
+                "\n\tgraph_and_exit - Output a graph in the training folder with the discovered "
+                "learning rates and exit."))
+        self.add_item(
+            section=section,
+            title="lr_finder_strength",
+            datatype=str,
+            default="default",
+            fixed=True,
+            gui_radio=True,
+            choices=["default", "aggressive", "extreme"],
+            group=_("Learning Rate Finder"),
+            info=_(
+                "How aggressively to set the Learning Rate. More aggressive can learn faster, but "
+                "is more likely to lead to exploding gradients."
+                "\n\tdefault - The default optimal learning rate. A safe choice for nearly all "
+                "use cases."
+                "\n\taggressive - Set's a higher learning rate than the default. May learn faster "
+                "but with a higher chance of exploding gradients."
+                "\n\textreme - The highest optimal learning rate. A much higher risk of exploding "
+                "gradients."))
         self.add_item(
             section=section,
             title="autoclip",
@@ -587,11 +634,25 @@ class Config(FaceswapConfig):
                 "performance."))
         self.add_item(
             section=section,
+            title="mask_dilation",
+            datatype=float,
+            min_max=(-5.0, 5.0),
+            rounding=1,
+            default=0,
+            fixed=False,
+            group=_("mask"),
+            info=_(
+                "Dilate or erode the mask. Negative values erode the mask (make it smaller). "
+                "Positive values dilate the mask (make it larger). The value given is a "
+                "percentage of the total mask size."))
+        self.add_item(
+            section=section,
             title="mask_blur_kernel",
             datatype=int,
             min_max=(0, 9),
             rounding=1,
             default=3,
+            fixed=False,
             group=_("mask"),
             info=_(
                 "Apply gaussian blur to the mask input. This has the effect of smoothing the "
@@ -606,6 +667,7 @@ class Config(FaceswapConfig):
             default=4,
             min_max=(0, 50),
             rounding=1,
+            fixed=False,
             group=_("mask"),
             info=_(
                 "Sets pixels that are near white to white and near black to black. Set to 0 for "

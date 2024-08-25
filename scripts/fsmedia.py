@@ -19,15 +19,15 @@ import imageio
 
 from lib.align import Alignments as AlignmentsBase, get_centered_size
 from lib.image import count_frames, read_image
-from lib.utils import (camel_case_split, get_image_paths, _video_extensions)
+from lib.utils import (camel_case_split, get_image_paths, VIDEO_EXTENSIONS)
 
 if T.TYPE_CHECKING:
     from collections.abc import Generator
     from argparse import Namespace
     from lib.align import AlignedFace
-    from plugins.extract.pipeline import ExtractMedia
+    from plugins.extract import ExtractMedia
 
-logger = logging.getLogger(__name__)  # pylint: disable=invalid-name
+logger = logging.getLogger(__name__)
 
 
 def finalize(images_found: int, num_faces_detected: int, verify_output: bool) -> None:
@@ -53,7 +53,7 @@ def finalize(images_found: int, num_faces_detected: int, verify_output: bool) ->
         logger.info("Double check your results.")
         logger.info("-------------------------")
 
-    logger.info("Process Succesfully Completed. Shutting Down...")
+    logger.info("Process Successfully Completed. Shutting Down...")
 
 
 class Alignments(AlignmentsBase):
@@ -222,7 +222,7 @@ class Images():
             logger.error("Input location %s not found.", self._args.input_dir)
             sys.exit(1)
         if (os.path.isfile(self._args.input_dir) and
-                os.path.splitext(self._args.input_dir)[1].lower() in _video_extensions):
+                os.path.splitext(self._args.input_dir)[1].lower() in VIDEO_EXTENSIONS):
             logger.info("Input Video: %s", self._args.input_dir)
             retval = True
         else:
@@ -287,12 +287,12 @@ class Images():
             A single frame
         """
         logger.debug("Input is video. Capturing frames")
-        vidname = os.path.splitext(os.path.basename(self._args.input_dir))[0]
+        vidname, ext = os.path.splitext(os.path.basename(self._args.input_dir))
         reader = imageio.get_reader(self._args.input_dir, "ffmpeg")  # type:ignore[arg-type]
         for i, frame in enumerate(T.cast(Iterator[np.ndarray], reader)):
             # Convert to BGR for cv2 compatibility
             frame = frame[:, :, ::-1]
-            filename = f"{vidname}_{i + 1:06d}.png"
+            filename = f"{vidname}_{i + 1:06d}{ext}"
             logger.trace("Loading video frame: '%s'", filename)  # type:ignore[attr-defined]
             yield filename, frame
         reader.close()
@@ -345,7 +345,7 @@ class Images():
         return frame
 
 
-class PostProcess():  # pylint:disable=too-few-public-methods
+class PostProcess():
     """ Optional pre/post processing tasks for convert and extract.
 
     Builds a pipeline of actions that have optionally been requested to be performed
@@ -414,21 +414,22 @@ class PostProcess():  # pylint:disable=too-few-public-methods
 
         Parameters
         ----------
-        extract_media: :class:`~plugins.extract.pipeline.ExtractMedia`
-            The :class:`~plugins.extract.pipeline.ExtractMedia` object to perform the
+        extract_media: :class:`~plugins.extract.extract_media.ExtractMedia`
+            The :class:`~plugins.extract.extract_media.ExtractMedia` object to perform the
             action on.
 
         Returns
         -------
-        :class:`~plugins.extract.pipeline.ExtractMedia`
-            The original :class:`~plugins.extract.pipeline.ExtractMedia` with any actions applied
+        :class:`~plugins.extract.extract_media.ExtractMedia`
+            The original :class:`~plugins.extract.extract_media.ExtractMedia` with any actions
+            applied
         """
         for action in self._actions:
             logger.debug("Performing postprocess action: '%s'", action.__class__.__name__)
             action.process(extract_media)
 
 
-class PostProcessAction():  # pylint: disable=too-few-public-methods
+class PostProcessAction():
     """ Parent class for Post Processing Actions.
 
     Usable in Extract or Convert or both depending on context. Any post-processing actions should
@@ -458,14 +459,14 @@ class PostProcessAction():  # pylint: disable=too-few-public-methods
 
         Parameters
         ----------
-        extract_media: :class:`~plugins.extract.pipeline.ExtractMedia`
-            The :class:`~plugins.extract.pipeline.ExtractMedia` object to perform the
+        extract_media: :class:`~plugins.extract.extract_media.ExtractMedia`
+            The :class:`~plugins.extract.extract_media.ExtractMedia` object to perform the
             action on.
         """
         raise NotImplementedError
 
 
-class DebugLandmarks(PostProcessAction):  # pylint: disable=too-few-public-methods
+class DebugLandmarks(PostProcessAction):
     """ Draw debug landmarks on face output. Extract Only """
     def __init__(self, *args, **kwargs) -> None:
         super().__init__(self, *args, **kwargs)
@@ -578,9 +579,9 @@ class DebugLandmarks(PostProcessAction):  # pylint: disable=too-few-public-metho
 
         Parameters
         ----------
-        extract_media: :class:`~plugins.extract.pipeline.ExtractMedia`
-            The :class:`~plugins.extract.pipeline.ExtractMedia` object that contains the faces to
-            draw the landmarks on to
+        extract_media: :class:`~plugins.extract.extract_media.ExtractMedia`
+            The :class:`~plugins.extract.extract_media.ExtractMedia` object that contains the faces
+            to draw the landmarks on to
         """
         frame = os.path.splitext(os.path.basename(extract_media.filename))[0]
         for idx, face in enumerate(extract_media.detected_faces):
@@ -600,6 +601,7 @@ class DebugLandmarks(PostProcessAction):  # pylint: disable=too-few-public-metho
             logger.trace("Drawing Landmarks. Frame: '%s'. Face: %s",  # type:ignore[attr-defined]
                          frame, idx)
             # Landmarks
+            assert face.aligned.face is not None
             for (pos_x, pos_y) in face.aligned.landmarks.astype("int32"):
                 cv2.circle(face.aligned.face, (pos_x, pos_y), 1, (0, 255, 255), -1)
             # Pose

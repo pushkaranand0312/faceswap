@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """ Install packages for faceswap.py """
-# pylint: disable=too-many-lines
+# pylint:disable=too-many-lines
 
 import logging
 import ctypes
@@ -19,8 +19,8 @@ from pkg_resources import parse_requirements
 
 from lib.logger import log_setup
 
-logger = logging.getLogger(__name__)  # pylint: disable=invalid-name
-backend_type: T.TypeAlias = T.Literal['nvidia', 'apple_silicon', 'directml', 'cpu', 'rocm']
+logger = logging.getLogger(__name__)
+backend_type: T.TypeAlias = T.Literal['nvidia', 'apple_silicon', 'directml', 'cpu', 'rocm', "all"]
 
 _INSTALL_FAILED = False
 # Packages that are explicitly required for setup.py
@@ -34,23 +34,30 @@ _BACKEND_SPECIFIC_CONDA: dict[backend_type, list[str]] = {
     "nvidia": ["cudatoolkit", "cudnn", "zlib-wapi"],
     "apple_silicon": ["libblas"]}
 # Packages that should only be installed through pip
-_FORCE_PIP: dict[backend_type, list[str]] = {"nvidia": ["tensorflow"]}
+_FORCE_PIP: dict[backend_type, list[str]] = {
+    "nvidia": ["tensorflow"],
+    "all": [
+        "tensorflow-cpu",  # conda-forge leads to flatbuffer errors because of mixed sources
+        "imageio-ffmpeg"]}  # 17/11/23 Conda forge uses incorrect ffmpeg, so fallback to pip
 # Revisions of tensorflow GPU and cuda/cudnn requirements. These relate specifically to the
 # Tensorflow builds available from pypi
-_TENSORFLOW_REQUIREMENTS = {">=2.10.0,<2.11.0": [">=11.0,<12.0", ">=8.0,<9.0"]}
+_TENSORFLOW_REQUIREMENTS = {">=2.10.0,<2.11.0": [">=11.2,<11.3", ">=8.1,<8.2"]}
 # ROCm min/max version requirements for Tensorflow
 _TENSORFLOW_ROCM_REQUIREMENTS = {">=2.10.0,<2.11.0": ((5, 2, 0), (5, 4, 0))}
 # TODO tensorflow-metal versioning
 
 # Mapping of Python packages to their conda names if different from pip or in non-default channel
 _CONDA_MAPPING: dict[str, tuple[str, str]] = {
+    "cudatoolkit": ("cudatoolkit", "conda-forge"),
+    "cudnn": ("cudnn", "conda-forge"),
     "fastcluster": ("fastcluster", "conda-forge"),
     "ffmpy": ("ffmpy", "conda-forge"),
-    "imageio-ffmpeg": ("imageio-ffmpeg", "conda-forge"),
+    # "imageio-ffmpeg": ("imageio-ffmpeg", "conda-forge"),
     "nvidia-ml-py": ("nvidia-ml-py", "conda-forge"),
     "tensorflow-deps": ("tensorflow-deps", "apple"),
     "libblas": ("libblas", "conda-forge"),
-    "zlib-wapi": ("zlib-wapi", "conda-forge")}
+    "zlib-wapi": ("zlib-wapi", "conda-forge"),
+    "xorg-libxft": ("xorg-libxft", "conda-forge")}
 
 # Force output to utf-8
 sys.stdout.reconfigure(encoding="utf-8", errors="replace")  # type:ignore[attr-defined]
@@ -296,13 +303,18 @@ class Packages():
     """
     def __init__(self, environment: Environment) -> None:
         self._env = environment
-        self._conda_required_packages: list[tuple[str, ...]] = [("tk", ), ("git", )]
+
+        # Default TK has bad fonts under Linux. There is a better build in Conda-Forge, so set
+        # channel accordingly
+        tk_channel = "conda-forge" if self._env.os_version[0].lower() == "linux" else "default"
+        self._conda_required_packages: list[tuple[list[str] | str, str]] = [("tk", tk_channel),
+                                                                            ("git", "default")]
         self._update_backend_specific_conda()
         self._installed_packages = self._get_installed_packages()
         self._conda_installed_packages = self._get_installed_conda_packages()
         self._required_packages: list[tuple[str, list[tuple[str, str]]]] = []
         self._missing_packages: list[tuple[str, list[tuple[str, str]]]] = []
-        self._conda_missing_packages: list[tuple[str, ...]] = []
+        self._conda_missing_packages: list[tuple[list[str] | str, str]] = []
 
     @property
     def prerequisites(self) -> list[tuple[str, list[tuple[str, str]]]]:
@@ -331,7 +343,7 @@ class Packages():
         return self._missing_packages
 
     @property
-    def to_install_conda(self) -> list[tuple[str, ...]]:
+    def to_install_conda(self) -> list[tuple[list[str] | str, str]]:
         """ list: The required conda packages that need to be installed """
         return self._conda_missing_packages
 
@@ -349,6 +361,8 @@ class Packages():
             logger.debug("No backend packages to add for '%s'. All optional packages: %s",
                          self._env.backend, _BACKEND_SPECIFIC_CONDA)
             return
+
+        combined_cuda = []
         for pkg in to_add:
             pkg, channel = _CONDA_MAPPING.get(pkg, (pkg, ""))
             if pkg == "zlib-wapi" and self._env.os_version[0].lower() != "windows":
@@ -357,14 +371,18 @@ class Packages():
             if pkg in ("cudatoolkit", "cudnn"):  # TODO Handle multiple cuda/cudnn requirements
                 idx = 0 if pkg == "cudatoolkit" else 1
                 pkg = f"{pkg}{list(_TENSORFLOW_REQUIREMENTS.values())[0][idx]}"
-            if pkg.startswith("cudnn"):
-                # We add cudnn first so that dependency resolver does not need to re-download cuda
-                # if an incompatible version was installed
-                self._conda_required_packages.insert(0, (pkg, channel))
-            else:
-                self._conda_required_packages.append((pkg, channel))
-            logger.debug("Adding conda required package '%s' for backend '%s')",
-                         pkg, self._env.backend)
+
+                combined_cuda.append(pkg)
+                continue
+
+            self._conda_required_packages.append((pkg, channel))
+            logger.info("Adding conda required package '%s' for backend '%s')",
+                        pkg, self._env.backend)
+
+        if combined_cuda:
+            self._conda_required_packages.append((combined_cuda, channel))
+            logger.info("Adding conda required package '%s' for backend '%s')",
+                        combined_cuda, self._env.backend)
 
     @classmethod
     def _format_requirements(cls, packages: list[str]
@@ -558,6 +576,16 @@ class Packages():
             key = reqs.unsafe_name
             specs = reqs.specs
 
+            if pkg[0] == "tk" and self._env.os_version[0].lower() == "linux":
+                # Default tk has bad fonts under Linux. We pull in an explicit build from
+                # Conda-Forge that is compiled with better fonts.
+                # Ref: https://github.com/ContinuumIO/anaconda-issues/issues/6833
+                newpkg = (f"{pkg[0]}=*=xft_*", pkg[1])  # Swap out package for explicit XFT version
+                self._conda_missing_packages.append(newpkg)
+                # We also need to bring in xorg-libxft incase libXft does not exist on host system
+                self._conda_missing_packages.append(_CONDA_MAPPING["xorg-libxft"])
+                continue
+
             if key not in self._conda_installed_packages:
                 self._conda_missing_packages.append(pkg)
                 continue
@@ -748,6 +776,44 @@ class Checks():  # pylint:disable=too-few-public-methods
             _INSTALL_FAILED = True
 
 
+def _check_ld_config(lib: str) -> str:
+    """ Locate a library in ldconfig
+
+    Parameters
+    ----------
+    lib: str The library to locate
+
+    Returns
+    -------
+    str
+        The library from ldconfig, or empty string if not found
+    """
+    retval = ""
+    ldconfig = which("ldconfig")
+    if not ldconfig:
+        return retval
+
+    retval = next((line.decode("utf-8", errors="replace").strip()
+                  for line in run([ldconfig, "-p"],
+                                  capture_output=True,
+                                  check=False).stdout.splitlines()
+                  if lib.encode("utf-8") in line), "")
+
+    if retval or (not retval and not os.environ.get("LD_LIBRARY_PATH")):
+        return retval
+
+    for path in os.environ["LD_LIBRARY_PATH"].split(":"):
+        if not path or not os.path.exists(path):
+            continue
+
+        retval = next((fname.strip() for fname in reversed(os.listdir(path))
+                       if lib in fname), "")
+        if retval:
+            break
+
+    return retval
+
+
 class ROCmCheck():  # pylint:disable=too-few-public-methods
     """ Find the location of system installed ROCm on Linux """
     def __init__(self) -> None:
@@ -768,13 +834,7 @@ class ROCmCheck():  # pylint:disable=too-few-public-methods
         with ldconfig then attempt to find it in LD_LIBRARY_PATH. If found, set the
         :attr:`rocm_version` to the discovered version
         """
-        chk = os.popen("ldconfig -p | grep -P \"librocm-core.so.\\d+\" | head -n 1").read()
-        if not chk and os.environ.get("LD_LIBRARY_PATH"):
-            for path in os.environ["LD_LIBRARY_PATH"].split(":"):
-                chk = os.popen(f"ls {path} | grep -P -o \"librocmcore.so.\\d+\" | "
-                               "head -n 1").read()
-                if chk:
-                    break
+        chk = _check_ld_config("librocm-core.so.")
         if not chk:
             return
 
@@ -821,8 +881,7 @@ class CudaCheck():  # pylint:disable=too-few-public-methods
                                 stdout.decode(locale.getpreferredencoding(), errors="ignore"))
             if version is not None:
                 self.cuda_version = version.groupdict().get("cuda", None)
-            locate = "where" if self._os == "windows" else "which"
-            path = os.popen(f"{locate} nvcc").read()
+            path = which("nvcc")
             if path:
                 path = path.split("\n")[0]  # Split multiple entries and take first found
                 while True:  # Get Cuda root folder
@@ -839,19 +898,15 @@ class CudaCheck():  # pylint:disable=too-few-public-methods
     def _cuda_check_linux(self) -> None:
         """ For Linux check the dynamic link loader for libcudart. If not found with ldconfig then
         attempt to find it in LD_LIBRARY_PATH. """
-        chk = os.popen("ldconfig -p | grep -P \"libcudart.so.\\d+.\\d+\" | head -n 1").read()
-        if not chk and os.environ.get("LD_LIBRARY_PATH"):
-            for path in os.environ["LD_LIBRARY_PATH"].split(":"):
-                chk = os.popen(f"ls {path} | grep -P -o \"libcudart.so.\\d+.\\d+\" | "
-                               "head -n 1").read()
-                if chk:
-                    break
+        chk = _check_ld_config("libcudart.so.")
         if not chk:  # Cuda not found
             return
 
         cudavers = chk.strip().replace("libcudart.so.", "")
-        self.cuda_version = cudavers[:cudavers.find(" ")]
-        self.cuda_path = chk[chk.find("=>") + 3:chk.find("targets") - 1]
+        self.cuda_version = cudavers[:cudavers.find(" ")] if " " in cudavers else cudavers
+        cuda_path = chk[chk.find("=>") + 3:chk.find("targets") - 1]
+        if os.path.exists(cuda_path):
+            self.cuda_path = cuda_path
 
     def _cuda_check_windows(self) -> None:
         """ Check Windows CUDA Version and path from Environment Variables"""
@@ -896,7 +951,7 @@ class CudaCheck():  # pylint:disable=too-few-public-methods
         if self._os == "windows":
             return
 
-        chk = os.popen("ldconfig -p | grep -P \"libcudnn.so.\" | head -n 1").read()
+        chk = _check_ld_config("libcudnn.so.")
         if not chk:
             return
         cudnnvers = chk.strip().replace("libcudnn.so.", "").split()[0]
@@ -915,7 +970,7 @@ class CudaCheck():  # pylint:disable=too-few-public-methods
         list
             List of header file locations to scan for cuDNN versions
         """
-        chk = os.popen("ldconfig -p | grep -P \"libcudnn.so.\\d+\" | head -n 1").read()
+        chk = _check_ld_config("libcudnn.so.")
         chk = chk.strip().replace("libcudnn.so.", "")
         if not chk:
             return []
@@ -938,7 +993,7 @@ class CudaCheck():  # pylint:disable=too-few-public-methods
             List of header file locations to scan for cuDNN versions
         """
         # TODO A more reliable way of getting the windows location
-        if not self.cuda_path:
+        if not self.cuda_path or not os.path.exists(self.cuda_path):
             return []
         scandir = os.path.join(self.cuda_path, "include")
         cudnn_checkfiles = [os.path.join(scandir, header) for header in self._cudnn_header_files]
@@ -1063,7 +1118,7 @@ class Install():  # pylint:disable=too-few-public-methods
                 mapping = _CONDA_MAPPING.get(pkg, (pkg, ""))
                 channel = "" if mapping[1] is None else mapping[1]
                 pkg = mapping[0]
-                pip_only = pkg in _FORCE_PIP.get(self._env.backend, [])
+                pip_only = pkg in _FORCE_PIP.get(self._env.backend, []) or pkg in _FORCE_PIP["all"]
             pkg = self._format_package(pkg, version) if version else pkg
             if self._env.is_conda and not pip_only:
                 if self._from_conda(pkg, channel=channel, conda_only=conda_only):
@@ -1076,15 +1131,15 @@ class Install():  # pylint:disable=too-few-public-methods
         self._install_python_packages()
 
     def _from_conda(self,
-                    package: str,
+                    package: list[str] | str,
                     channel: str = "",
                     conda_only: bool = False) -> bool:
         """ Install a conda package
 
         Parameters
         ----------
-        package: str
-            The full formatted package, with version, to be installed
+        package: list[str] | str
+            The full formatted package(s), with version(s), to be installed
         channel: str, optional
             The Conda channel to install from. Select empty string for default channel.
             Default: ``""`` (empty string)
@@ -1102,11 +1157,14 @@ class Install():  # pylint:disable=too-few-public-methods
         if channel:
             condaexe.extend(["-c", channel])
 
-        if any(char in package for char in (" ", "<", ">", "*", "|")):
-            package = f"\"{package}\""
-        condaexe.append(package)
+        pkgs = package if isinstance(package, list) else [package]
 
-        clean_pkg = package.replace("\"", "")
+        for i, pkg in enumerate(pkgs):
+            if any(char in pkg for char in (" ", "<", ">", "*", "|")):
+                pkgs[i] = f"\"{pkg}\""
+        condaexe.extend(pkgs)
+
+        clean_pkg = " ".join([p.replace("\"", "") for p in pkgs])
         installer = self._installer(self._env, clean_pkg, condaexe, self._is_gui)
         retcode = installer()
 
@@ -1376,7 +1434,7 @@ class Installer():
         self._seen_lines.add(text)
 
 
-class PexpectInstaller(Installer):  # pylint: disable=too-few-public-methods
+class PexpectInstaller(Installer):  # pylint:disable=too-few-public-methods
     """ Package installer for Linux/macOS using Pexpect
 
     Uses Pexpect for installing packages allowing access to realtime feedback
@@ -1414,7 +1472,7 @@ class PexpectInstaller(Installer):  # pylint: disable=too-few-public-methods
         return proc.exitstatus
 
 
-class WinPTYInstaller(Installer):  # pylint: disable=too-few-public-methods
+class WinPTYInstaller(Installer):  # pylint:disable=too-few-public-methods
     """ Package installer for Windows using WinPTY
 
     Spawns a pseudo PTY for installing packages allowing access to realtime feedback

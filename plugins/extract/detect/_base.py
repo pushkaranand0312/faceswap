@@ -4,7 +4,7 @@
 All Detector Plugins should inherit from this class.
 See the override methods for which methods are required.
 
-The plugin will receive a :class:`~plugins.extract.pipeline.ExtractMedia` object.
+The plugin will receive a :class:`~plugins.extract.extract_media.ExtractMedia` object.
 
 For each source frame, the plugin must pass a dict to finalize containing:
 
@@ -30,7 +30,7 @@ from lib.align import DetectedFace
 from lib.utils import FaceswapError
 
 from plugins.extract._base import BatchType, Extractor, ExtractorBatch
-from plugins.extract.pipeline import ExtractMedia
+from plugins.extract import ExtractMedia
 
 if T.TYPE_CHECKING:
     from collections.abc import Generator
@@ -61,6 +61,15 @@ class DetectorBatch(ExtractorBatch):
     scale: list[float] = field(default_factory=list)
     pad: list[tuple[int, int]] = field(default_factory=list)
     initial_feed: np.ndarray = np.array([])
+
+    def __repr__(self):
+        """ Prettier repr for debug printing """
+        retval = super().__repr__()
+        retval += (f", rotation_matrix={self.rotation_matrix}, "
+                   f"scale={self.scale}, "
+                   f"pad={self.pad}, "
+                   f"initial_feed=({self.initial_feed.shape}, {self.initial_feed.dtype})")
+        return retval
 
 
 class Detector(Extractor):  # pylint:disable=abstract-method
@@ -123,8 +132,8 @@ class Detector(Extractor):  # pylint:disable=abstract-method
     def get_batch(self, queue: Queue) -> tuple[bool, DetectorBatch]:
         """ Get items for inputting to the detector plugin in batches
 
-        Items are received as :class:`~plugins.extract.pipeline.ExtractMedia` objects and converted
-        to ``dict`` for internal processing.
+        Items are received as :class:`~plugins.extract.extract_media.ExtractMedia` objects and
+        converted to ``dict`` for internal processing.
 
         Items are returned from the ``queue`` in batches of
         :attr:`~plugins.extract._base.Extractor.batchsize`
@@ -199,7 +208,7 @@ class Detector(Extractor):  # pylint:disable=abstract-method
 
         Yields
         ------
-        :class:`~plugins.extract.pipeline.ExtractMedia`
+        :class:`~plugins.extract.extract_media.ExtractMedia`
             The :attr:`DetectedFaces` list will be populated for this class with the bounding boxes
             for the detected faces found in the frame.
         """
@@ -283,8 +292,26 @@ class Detector(Extractor):  # pylint:disable=abstract-method
                 if angle == 0:
                     batch.prediction = pred
                 else:
-                    batch.prediction = np.array([b if b.any() else p
-                                                 for b, p in zip(batch.prediction, pred)])
+                    try:
+                        batch.prediction = np.array([b if b.any() else p
+                                                    for b, p in zip(batch.prediction, pred)])
+                    except ValueError as err:
+                        # If batches are different sizes after rotation Numpy will error, so we
+                        # need to explicitly set the dtype to 'object' rather than let it infer
+                        # numpy error:
+                        # ValueError: setting an array element with a sequence. The requested array
+                        # has an inhomogeneous shape after 1 dimensions. The detected shape was
+                        # (8,) + inhomogeneous part
+                        if "inhomogeneous" in str(err):
+                            batch.prediction = np.array([b if b.any() else p
+                                                         for b, p in zip(batch.prediction, pred)],
+                                                        dtype="object")
+                            logger.trace(  # type:ignore[attr-defined]
+                                "Mismatched array sizes, setting dtype to object: %s",
+                                [p.shape for p in batch.prediction])
+                        else:
+                            raise
+
                 logger.trace("angle: %s, filenames: %s, "  # type:ignore[attr-defined]
                              "prediction: %s",
                              angle, batch.filename, pred)
@@ -307,7 +334,6 @@ class Detector(Extractor):  # pylint:disable=abstract-method
             found_faces = T.cast(list[np.ndarray], ([face if not found.any() else found
                                                      for face, found in zip(batch.prediction,
                                                                             found_faces)]))
-
             if all(face.any() for face in found_faces):
                 logger.trace("Faces found for all images")  # type:ignore[attr-defined]
                 break
@@ -325,7 +351,7 @@ class Detector(Extractor):  # pylint:disable=abstract-method
 
         Parameters
         ----------
-        item: :class:`plugins.extract.pipeline.ExtractMedia`
+        item: :class:`~plugins.extract.extract_media.ExtractMedia`
             The input item from the pipeline
 
         Returns

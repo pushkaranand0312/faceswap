@@ -266,7 +266,7 @@ conda_opts () {
     echo ""
     info "Faceswap will be installed inside a Conda Environment. If an environment already\
     exists with the name specified then it will be deleted."
-    ask "Please specify a name for the Faceswap Conda Environmnet" "ENV_NAME"
+    ask "Please specify a name for the Faceswap Conda Environment" "ENV_NAME"
 }
 
 faceswap_opts () {
@@ -380,7 +380,9 @@ activate_env() {
 install_git() {
     # Install git inside conda environment
     info "Installing Git..."
-    yellow ; conda install git -q -y
+    # TODO On linux version 2.45.2 makes the font fixed TK pull in Python from
+    # graalpy, which breaks pretty much everything
+    yellow ; conda install "git<2.45" -q -y
 }
 
 delete_faceswap() {

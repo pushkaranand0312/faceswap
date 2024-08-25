@@ -1,5 +1,6 @@
 #!/usr/bin/python
 """ Logging Functions for Faceswap. """
+# NOTE: Don't import non stdlib packages. This module is accessed by setup.py
 import collections
 import logging
 from logging.handlers import RotatingFileHandler
@@ -7,6 +8,7 @@ import os
 import platform
 import re
 import sys
+import typing as T
 import time
 import traceback
 
@@ -143,7 +145,7 @@ class ColoredFormatter(logging.Formatter):
     def _get_sample_time_string(self) -> int:
         """ Obtain a sample time string and calculate correct padding.
 
-        This may be inaccurate wheb ticking over an integer from single to double digits, but that
+        This may be inaccurate when ticking over an integer from single to double digits, but that
         shouldn't be a huge issue.
 
         Returns
@@ -541,6 +543,52 @@ def crash_log() -> str:
         outfile.write(original_traceback)
         outfile.write(sysinfo.encode("utf-8"))
     return filename
+
+
+def _process_value(value: T.Any) -> T.Any:
+    """ Process the values from a local dict and return in a loggable format
+
+    Parameters
+    ----------
+    value: Any
+        The dictionary value
+
+    Returns
+    -------
+    Any
+        The original or ammended value
+    """
+    if isinstance(value, str):
+        return f'"{value}"'
+    if isinstance(value, (list, tuple, set)) and len(value) > 10:
+        return f'[type: "{type(value).__name__}" len: {len(value)}'
+
+    try:
+        import numpy as np  # pylint:disable=import-outside-toplevel
+    except ImportError:
+        return value
+
+    if isinstance(value, np.ndarray) and np.prod(value.shape) > 10:
+        return f'[type: "{type(value).__name__}" shape: {value.shape}, dtype: "{value.dtype}"]'
+    return value
+
+
+def parse_class_init(locals_dict: dict[str, T.Any]) -> str:
+    """ Parse a locals dict from a class and return in a format suitable for logging
+    Parameters
+    ----------
+    locals_dict: dict[str, T.Any]
+        A locals() dictionary from a newly initialized class
+    Returns
+    -------
+    str
+        The locals information suitable for logging
+    """
+    delimit = {k: _process_value(v)
+               for k, v in locals_dict.items() if k != "self"}
+    dsp = ", ".join(f"{k}: {v}" for k, v in delimit.items())
+    dsp = f" ({dsp})" if dsp else ""
+    return f"Initializing {locals_dict['self'].__class__.__name__}{dsp}"
 
 
 _OLD_FACTORY = logging.getLogRecordFactory()

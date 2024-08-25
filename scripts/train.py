@@ -17,8 +17,8 @@ from lib.image import read_image_meta
 from lib.keypress import KBHit
 from lib.multithreading import MultiThread, FSThread
 from lib.training import Preview, PreviewBuffer, TriggerType
-from lib.utils import (get_folder, get_image_paths,
-                       FaceswapError, _image_extensions)
+from lib.utils import (get_folder, get_image_paths, handle_deprecated_cliopts,
+                       FaceswapError, IMAGE_EXTENSIONS)
 from plugins.plugin_loader import PluginLoader
 
 if T.TYPE_CHECKING:
@@ -31,7 +31,7 @@ if T.TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-class Train():  # pylint:disable=too-few-public-methods
+class Train():
     """ The Faceswap Training Process.
 
     The training process is responsible for training a model on a set of source faces and a set of
@@ -48,8 +48,7 @@ class Train():  # pylint:disable=too-few-public-methods
     """
     def __init__(self, arguments: argparse.Namespace) -> None:
         logger.debug("Initializing %s: (args: %s", self.__class__.__name__, arguments)
-        self._args = arguments
-        self._handle_deprecations()
+        self._args = handle_deprecated_cliopts(arguments)
 
         if self._args.summary:
             # If just outputting summary we don't need to initialize everything
@@ -67,10 +66,6 @@ class Train():  # pylint:disable=too-few-public-methods
         self._preview = PreviewInterface(self._args.preview)
 
         logger.debug("Initialized %s", self.__class__.__name__)
-
-    def _handle_deprecations(self) -> None:
-        """ Handle the update of deprecated arguments and output warnings. """
-        return
 
     def _get_images(self) -> dict[T.Literal["a", "b"], list[str]]:
         """ Check the image folders exist and contains valid extracted faces. Obtain image paths.
@@ -174,7 +169,7 @@ class Train():  # pylint:disable=too-few-public-methods
                 continue  # Time-lapse folder is training folder
 
             filenames = [fname for fname in os.listdir(folder)
-                         if os.path.splitext(fname)[-1].lower() in _image_extensions]
+                         if os.path.splitext(fname)[-1].lower() in IMAGE_EXTENSIONS]
             if not filenames:
                 raise FaceswapError(f"The Timelapse path '{folder}' does not contain any valid "
                                     "images")
@@ -258,11 +253,14 @@ class Train():  # pylint:disable=too-few-public-methods
             logger.info("Loading data, this may take a while...")
             model = self._load_model()
             trainer = self._load_trainer(model)
+            if trainer.exit_early:
+                self._stop = True
+                return
             self._run_training_cycle(model, trainer)
         except KeyboardInterrupt:
             try:
                 logger.debug("Keyboard Interrupt Caught. Saving Weights and exiting")
-                model.save(is_exit=True)
+                model.io.save(is_exit=True)
                 trainer.clear_tensorboard()
             except KeyboardInterrupt:
                 logger.info("Saving model weights has been cancelled!")
@@ -360,12 +358,12 @@ class Train():  # pylint:disable=too-few-public-methods
             if save_iteration or self._save_now:
                 logger.debug("Saving (save_iterations: %s, save_now: %s) Iteration: "
                              "(iteration: %s)", save_iteration, self._save_now, iteration)
-                model.save(is_exit=False)
+                model.io.save(is_exit=False)
                 self._save_now = False
                 update_preview_images = True
 
         logger.debug("Training cycle complete")
-        model.save(is_exit=True)
+        model.io.save(is_exit=True)
         trainer.clear_tensorboard()
         self._stop = True
 
@@ -378,8 +376,8 @@ class Train():  # pylint:disable=too-few-public-methods
             logger.info("  Using live preview")
         if sys.stdout.isatty():
             logger.info("  Press '%s' to save and quit",
-                        "Stop" if self._args.redirect_gui or self._args.colab else "ENTER")
-        if not self._args.redirect_gui and not self._args.colab and sys.stdout.isatty():
+                        "Stop" if self._args.redirect_gui else "ENTER")
+        if not self._args.redirect_gui and sys.stdout.isatty():
             logger.info("  Press 'S' to save model weights immediately")
         logger.info("===================================================")
 
@@ -496,13 +494,13 @@ class Train():  # pylint:disable=too-few-public-methods
                 logger.debug("Saving preview to disk")
                 img = "training_preview.png"
                 imgfile = os.path.join(scriptpath, img)
-                cv2.imwrite(imgfile, image)  # pylint: disable=no-member
+                cv2.imwrite(imgfile, image)  # pylint:disable=no-member
                 logger.debug("Saved preview to: '%s'", img)
             if self._args.redirect_gui:
                 logger.debug("Generating preview for GUI")
                 img = TRAININGPREVIEW
                 imgfile = os.path.join(scriptpath, "lib", "gui", ".cache", "preview", img)
-                cv2.imwrite(imgfile, image)  # pylint: disable=no-member
+                cv2.imwrite(imgfile, image)  # pylint:disable=no-member
                 logger.debug("Generated preview for GUI: '%s'", imgfile)
             if self._args.preview:
                 logger.debug("Generating preview for display: '%s'", name)

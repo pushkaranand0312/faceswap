@@ -8,17 +8,17 @@ import typing as T
 from argparse import Namespace
 from multiprocessing import Process
 
-from lib.utils import _video_extensions, FaceswapError
+from lib.utils import FaceswapError, handle_deprecated_cliopts, VIDEO_EXTENSIONS
 from .media import AlignmentData
-from .jobs import Check, Sort, Spatial  # noqa pylint: disable=unused-import
-from .jobs_faces import FromFaces, RemoveFaces, Rename  # noqa pylint: disable=unused-import
-from .jobs_frames import Draw, Extract  # noqa pylint: disable=unused-import
+from .jobs import Check, Export, Sort, Spatial  # noqa pylint:disable=unused-import
+from .jobs_faces import FromFaces, RemoveFaces, Rename  # noqa pylint:disable=unused-import
+from .jobs_frames import Draw, Extract  # noqa pylint:disable=unused-import
 
 
-logger = logging.getLogger(__name__)  # pylint: disable=invalid-name
+logger = logging.getLogger(__name__)
 
 
-class Alignments():  # pylint:disable=too-few-public-methods
+class Alignments():
     """ The main entry point for Faceswap's Alignments Tool. This tool is part of the Faceswap
     Tools suite and should be called from the ``python tools.py alignments`` command.
 
@@ -34,7 +34,7 @@ class Alignments():  # pylint:disable=too-few-public-methods
     """
     def __init__(self, arguments: Namespace) -> None:
         logger.debug("Initializing %s: (arguments: %s)", self.__class__.__name__, arguments)
-        self._requires_alignments = ["sort", "spatial"]
+        self._requires_alignments = ["export", "sort", "spatial"]
         self._requires_faces = ["extract", "from-faces"]
         self._requires_frames = ["draw",
                                  "extract",
@@ -42,7 +42,7 @@ class Alignments():  # pylint:disable=too-few-public-methods
                                  "missing-frames",
                                  "no-faces"]
 
-        self._args = arguments
+        self._args = handle_deprecated_cliopts(arguments)
         self._batch_mode = self._validate_batch_mode()
         self._locations = self._get_locations()
 
@@ -117,7 +117,7 @@ class Alignments():  # pylint:disable=too-few-public-methods
         candidates = [os.path.join(self._args.frames_dir, fname)
                       for fname in os.listdir(self._args.frames_dir)
                       if os.path.isdir(os.path.join(self._args.frames_dir, fname))
-                      or os.path.splitext(fname)[-1].lower() in _video_extensions]
+                      or os.path.splitext(fname)[-1].lower() in VIDEO_EXTENSIONS]
         logger.debug("Frame candidates: %s", candidates)
 
         for candidate in candidates:
@@ -239,7 +239,7 @@ class Alignments():  # pylint:disable=too-few-public-methods
                 self._run_process(args)
 
 
-class _Alignments():  # pylint:disable=too-few-public-methods
+class _Alignments():
     """ The main entry point for Faceswap's Alignments Tool. This tool is part of the Faceswap
     Tools suite and should be called from the ``python tools.py alignments`` command.
 
@@ -259,6 +259,11 @@ class _Alignments():  # pylint:disable=too-few-public-methods
             self.alignments = None
         else:
             self.alignments = AlignmentData(self._find_alignments())
+
+        if (self.alignments is not None and
+                arguments.frames_dir and
+                os.path.isfile(arguments.frames_dir)):
+            self.alignments.update_legacy_has_source(os.path.basename(arguments.frames_dir))
 
         logger.debug("Initialized %s", self.__class__.__name__)
 
@@ -289,7 +294,7 @@ class _Alignments():  # pylint:disable=too-few-public-methods
         if os.path.isdir(frames) and os.path.exists(os.path.join(frames, fname)):
             return fname
 
-        if os.path.isdir(frames) or os.path.splitext(frames)[-1] not in _video_extensions:
+        if os.path.isdir(frames) or os.path.splitext(frames)[-1] not in VIDEO_EXTENSIONS:
             logger.error("Can't find a valid alignments file in location: %s", frames)
             sys.exit(1)
 

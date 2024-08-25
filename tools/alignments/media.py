@@ -17,14 +17,14 @@ from tqdm import tqdm
 from lib.align import Alignments, DetectedFace, update_legacy_png_header
 from lib.image import (count_frames, generate_thumbnail, ImagesLoader,
                        png_write_meta, read_image, read_image_meta_batch)
-from lib.utils import _image_extensions, _video_extensions, FaceswapError
+from lib.utils import IMAGE_EXTENSIONS, VIDEO_EXTENSIONS, FaceswapError
 
 if T.TYPE_CHECKING:
     from collections.abc import Generator
     import numpy as np
     from lib.align.alignments import AlignmentFileDict, PNGHeaderDict
 
-logger = logging.getLogger(__name__)  # pylint: disable=invalid-name
+logger = logging.getLogger(__name__)
 
 
 class AlignmentData(Alignments):
@@ -134,9 +134,9 @@ class MediaLoader():
 
         if (loadtype == "Frames" and
                 os.path.isfile(self.folder) and
-                os.path.splitext(self.folder)[1].lower() in _video_extensions):
+                os.path.splitext(self.folder)[1].lower() in VIDEO_EXTENSIONS):
             logger.verbose("Video exists at: '%s'", self.folder)  # type: ignore
-            retval = cv2.VideoCapture(self.folder)  # pylint: disable=no-member
+            retval = cv2.VideoCapture(self.folder)  # pylint:disable=no-member
             # TODO ImageIO single frame seek seems slow. Look into this
             # retval = imageio.get_reader(self.folder, "ffmpeg")
         else:
@@ -148,7 +148,7 @@ class MediaLoader():
     def valid_extension(filename) -> bool:
         """ bool: Check whether passed in file has a valid extension """
         extension = os.path.splitext(filename)[1]
-        retval = extension.lower() in _image_extensions
+        retval = extension.lower() in IMAGE_EXTENSIONS
         logger.trace("Filename has valid extension: '%s': %s", filename, retval)  # type: ignore
         return retval
 
@@ -203,7 +203,7 @@ class MediaLoader():
         frame = os.path.splitext(filename)[0]
         logger.trace("Loading video frame: '%s'", frame)  # type: ignore
         frame_no = int(frame[frame.rfind("_") + 1:]) - 1
-        self._vid_reader.set(cv2.CAP_PROP_POS_FRAMES, frame_no)  # pylint: disable=no-member
+        self._vid_reader.set(cv2.CAP_PROP_POS_FRAMES, frame_no)  # pylint:disable=no-member
 
         _, image = self._vid_reader.read()
         # TODO imageio single frame seek seems slow. Look into this
@@ -245,12 +245,12 @@ class MediaLoader():
         output_file = os.path.splitext(output_file)[0] + ".png"
         logger.trace("Saving image: '%s'", output_file)  # type: ignore
         if metadata:
-            encoded_image = cv2.imencode(".png", image)[1]
-            encoded_image = png_write_meta(encoded_image.tobytes(), metadata)
+            encoded = cv2.imencode(".png", image)[1]
+            encoded_image = png_write_meta(encoded.tobytes(), metadata)
             with open(output_file, "wb") as out_file:
                 out_file.write(encoded_image)
         else:
-            cv2.imwrite(output_file, image)  # pylint: disable=no-member
+            cv2.imwrite(output_file, image)  # pylint:disable=no-member
 
 
 class Faces(MediaLoader):
@@ -473,14 +473,14 @@ class Frames(MediaLoader):
             The full framename, the filename and the file extension of the frame
         """
         logger.info("Loading video frames from %s", self.folder)
-        vidname = os.path.splitext(os.path.basename(self.folder))[0]
+        vidname, ext = os.path.splitext(os.path.basename(self.folder))
         for i in range(self.count):
             idx = i + 1
             # Keep filename format for outputted face
             filename = f"{vidname}_{idx:06d}"
-            retval = {"frame_fullname": f"{filename}.png",
+            retval = {"frame_fullname": f"{filename}{ext}",
                       "frame_name": filename,
-                      "frame_extension": ".png"}
+                      "frame_extension": ext}
             logger.trace(retval)  # type: ignore
             yield retval
 
